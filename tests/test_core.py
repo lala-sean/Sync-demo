@@ -26,6 +26,7 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(geometry_parameters(),{
             'center_axis':'+Y','opening_axis':'+X','optimize_axes':True,'offset_mode':'zero','manual_offset_mm':[0.,0.,0.]})
         with self.assertRaises(ValueError):geometry_parameters({'center_axis':'+Y','opening_axis':'+Y'})
+        with self.assertRaises(ValueError):geometry_parameters({'center_axis':'+Y','opening_axis':'-Y'})
         with self.assertRaises(ValueError):geometry_parameters({'offset_mode':'manual','manual_offset_mm':[100,0,0]})
 
     def test_projection_zero_manual_and_optimized_offset(self):
@@ -39,6 +40,9 @@ class GeometryTests(unittest.TestCase):
         optimized={'center_axis':'+Y','opening_axis':'+X','offset_mode':'optimize'}
         ouv,_=project_geometry(np.r_[fixed[:6],[.01,0,0],fixed[6]],state,np.zeros(3),self.K,self.D,[0,1],optimized)
         np.testing.assert_allclose(muv,ouv,atol=1e-10)
+        negative={**geometry_parameters({'center_axis':'+Y','opening_axis':'-X','optimize_axes':False}),'offset_mode':'zero'}
+        nuv,_=project_geometry(fixed,state,np.zeros(3),self.K,self.D,[0,1],negative)
+        np.testing.assert_allclose(nuv[:,1],uv[:,2],atol=1e-10);np.testing.assert_allclose(nuv[:,2],uv[:,1],atol=1e-10)
         print('Projection evidence:',json.dumps({'state':state.tolist(),'zero_offset_uv':uv.tolist(),
               'manual_offset_uv':muv.tolist(),'depth_m':cam[:,:,2].tolist()}))
 
@@ -117,7 +121,7 @@ class GeometryTests(unittest.TestCase):
         auto={**geometry,'center_axis':'+X','opening_axis':'+Z','optimize_axes':True}
         result=fit(episode,annotations,camera,geometry=auto,starts=3)
         self.assertEqual((result['geometry']['center_axis'],result['geometry']['opening_axis']),('+Y','+X'))
-        self.assertTrue(result['geometry']['optimize_axes']);self.assertEqual(len(result['axis_selection']['candidates']),6)
+        self.assertTrue(result['geometry']['optimize_axes']);self.assertEqual(len(result['axis_selection']['candidates']),24)
         self.assertFalse(result['axis_selection']['validation_used_for_selection'])
         perturbed=copy.deepcopy(annotations)
         for a in perturbed:

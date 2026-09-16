@@ -12,10 +12,10 @@ The robot observation supplies a 6D tool pose for every video frame:
 - quaternion in `qx, qy, qz, qw` order;
 - `state_7` as the full jaw opening angle in radians.
 
-The constrained jaw skeleton contains a jaw root and two symmetric tips. Each jaw uses `±state_7 / 2`; Tip A opens toward the selected positive opening axis and Tip B opens in the opposite direction. By default the application jointly evaluates the six valid orthogonal coordinate-axis pairs:
+The constrained jaw skeleton contains a jaw root and two symmetric tips. Each jaw uses `±state_7 / 2`; Tip A opens toward the selected signed opening direction and Tip B opens in the opposite direction. By default the application jointly evaluates all 24 valid orthogonal signed coordinate-axis pairs:
 
-- jaw centerline: `+X`, `+Y`, or `+Z` in the tool frame;
-- opening direction: either remaining positive tool axis.
+- jaw centerline: `±X`, `±Y`, or `±Z` in the tool frame;
+- opening direction: either signed axis orthogonal to the centerline.
 
 Every pair receives an independent robust fit. The pair with the lowest fitting RMS is selected; validation landmarks never participate in axis selection. Automatic selection can be disabled in the UI to fix the axes manually, using `+Y` centerline and `+X` opening as the initial values.
 
@@ -44,7 +44,7 @@ Optimize-offset mode additionally fits the three offset coordinates. The program
 - Action-based selection covers low/high gripper values, grasp changes, position, orientation and recording time; action is never used as registration geometry.
 - Configurable PSM1/PSM2 observation source.
 - Importable OpenCV8 camera intrinsics with optional full-frame resolution scaling.
-- Joint discrete optimization over six orthogonal positive coordinate-axis pairs, with an optional manual-axis mode.
+- Joint discrete optimization over 24 orthogonal signed coordinate-axis pairs, with an optional manual-axis mode.
 - Separate fitting and held-out validation frames; validation is excluded from both parameter fitting and axis selection.
 - SQPnP camera initialization followed by bounded robust soft-L1 optimization.
 - Fit RMS, validation RMS and per-frame residual table.
@@ -160,7 +160,7 @@ Validation frames are excluded from SQPnP initialization and nonlinear optimizat
 `T_camera_PSMbase` maps column vectors from the selected PSM base frame into the camera frame. Translation is in metres. The registration JSON also records:
 
 - camera matrix and distortion values actually used;
-- selected centerline, opening axis, all six candidate scores and offset mode;
+- selected centerline, opening axis, all 24 candidate scores and offset mode;
 - resolved tool-frame root offset;
 - fitted jaw length;
 - annotations and their fit/validation roles;

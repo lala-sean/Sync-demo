@@ -153,7 +153,9 @@ def select_action_frames(episode, arm=1, count=12):
             'action_position_span_mm':float(np.linalg.norm(np.ptp(p,axis=0))*1000),'action_gripper_range':[float(s[:,7].min()),float(s[:,7].max())],
             'note':'Action is used only to select candidate image frames. Registration and skeleton motion still use observation/state. Grasp-change candidates are not confirmed clutch events; inspect image visibility and physical response.'}
 
-AXES={'+X':np.array([1.,0.,0.]),'+Y':np.array([0.,1.,0.]),'+Z':np.array([0.,0.,1.])}
+AXES={'+X':np.array([1.,0.,0.]),'-X':np.array([-1.,0.,0.]),
+      '+Y':np.array([0.,1.,0.]),'-Y':np.array([0.,-1.,0.]),
+      '+Z':np.array([0.,0.,1.]),'-Z':np.array([0.,0.,-1.])}
 
 def geometry_parameters(config=None):
     """Validate the user-selected, physically constrained jaw geometry."""
@@ -161,9 +163,9 @@ def geometry_parameters(config=None):
     center_axis=config.get('center_axis','+Y');opening_axis=config.get('opening_axis','+X')
     mode=config.get('offset_mode','zero')
     if center_axis not in AXES or opening_axis not in AXES:
-        raise ValueError('Centerline and opening direction must be +X, +Y, or +Z.')
-    if center_axis==opening_axis:
-        raise ValueError('Opening direction must use a different tool axis from the centerline.')
+        raise ValueError('Centerline and opening direction must be ±X, ±Y, or ±Z.')
+    if abs(float(np.dot(AXES[center_axis],AXES[opening_axis])))>.5:
+        raise ValueError('Opening direction must be orthogonal to the centerline.')
     if mode not in ['zero','manual','optimize']:
         raise ValueError('Offset mode must be zero, manual, or optimize.')
     manual=np.asarray(config.get('manual_offset_mm',[0,0,0]),dtype=float)
@@ -279,9 +281,9 @@ def _fit_one_geometry(episode, annotations, camera, arm=1, scale=True, geometry=
             'optimizer_success':bool(best.success),'optimizer_message':best.message,'source':{'csv':episode['csv'],'video':episode['video'],'fps':episode['fps'],'size':episode['size']}}
 
 def fit(episode, annotations, camera, arm=1, scale=True, geometry=None, progress=lambda x:None, starts=8):
-    """Fit one fixed axis pair or select the best pair from six discrete choices.
+    """Fit one fixed axis pair or select the best of 24 signed-axis choices.
 
-    Automatic axis selection enumerates only orthogonal positive tool axes. Each
+    Automatic axis selection enumerates only orthogonal signed tool axes. Each
     candidate is independently fitted, and the winner is selected using fitting
     RMS only. Held-out validation pixels never influence the selected pair or its
     optimized parameters.
@@ -289,7 +291,7 @@ def fit(episode, annotations, camera, arm=1, scale=True, geometry=None, progress
     geometry=geometry_parameters(geometry)
     if not geometry['optimize_axes']:
         return _fit_one_geometry(episode,annotations,camera,arm,scale,geometry,progress,starts)
-    candidates=[];results=[];pairs=[(c,o) for c in AXES for o in AXES if c!=o]
+    candidates=[];results=[];pairs=[(c,o) for c in AXES for o in AXES if abs(float(np.dot(AXES[c],AXES[o])))<.5]
     for i,(center_axis,opening_axis) in enumerate(pairs):
         candidate={**geometry,'center_axis':center_axis,'opening_axis':opening_axis,'optimize_axes':False}
         def report(message,i=i,center_axis=center_axis,opening_axis=opening_axis):
@@ -300,9 +302,9 @@ def fit(episode, annotations, camera, arm=1, scale=True, geometry=None, progress
             'jaw_length_mm':result['jaw_length_mm'],'pivot_offset_tool_m':result['pivot_offset_tool_m']})
     selected_index=int(np.argmin([x['fit_rms_px'] for x in candidates]));selected=results[selected_index]
     selected['geometry']['optimize_axes']=True
-    selected['axis_selection']={'mode':'discrete_positive_coordinate_axes','selection_metric':'fit_rms_px',
+    selected['axis_selection']={'mode':'discrete_signed_coordinate_axes','selection_metric':'fit_rms_px',
         'validation_used_for_selection':False,'selected_index':selected_index,'candidates':candidates}
-    selected['warnings'].append('Centerline and opening directions were selected from six orthogonal positive-axis pairs using fitting frames only.')
+    selected['warnings'].append('Centerline and opening directions were selected from 24 orthogonal signed-axis pairs using fitting frames only.')
     return selected
 
 def export_video(episode,result,path,progress=lambda x:None):
