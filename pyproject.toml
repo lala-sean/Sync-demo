@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sync-demo"
+version = "0.1.0"
+description = "Local web UI for constrained, state-driven surgical instrument registration"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Shuojue"}]
+dependencies = [
+  "Flask>=3.0,<4",
+  "numpy>=1.26,<3",
+  "scipy>=1.11,<2",
+  "opencv-contrib-python>=4.10,<5",
+]
+
+[project.scripts]
+sync-demo = "sync_demo.app:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["sync_demo*"]
+
+[tool.setuptools.package-data]
+sync_demo = ["static/*.html", "static/*.css", "static/*.js"]
+
