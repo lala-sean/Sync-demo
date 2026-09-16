@@ -162,6 +162,7 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(client.post('/api/discover',json={'folder':'/tmp'}).status_code,403)
         self.assertEqual(client.get('/',headers={'Host':'untrusted.example'}).status_code,403)
         page=client.get('/');self.assertEqual(page.status_code,200);self.assertIn(b'Jaw centerline',page.data)
+        self.assertIn(b'id="rootWeight" type="range" min="1" max="3" step="0.01" value="1"',page.data)
 
 
 if __name__=='__main__':unittest.main()

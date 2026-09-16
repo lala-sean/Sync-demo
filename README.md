@@ -33,7 +33,7 @@ With zero or manual offset, the only continuously optimized quantities are:
 
 Optimize-correction mode additionally fits the three root-correction coordinates. It never fits a separate per-frame 2D correction. The program does not fit a jaw mounting rotation or a gripper gain.
 
-The optional root-landmark weight remains restricted to `1×–3×`. `1×` gives every annotated landmark equal influence; `1.41×` balances the aggregate Root contribution against the two tips; `2×` or `3×` can be used when root alignment is the priority. The weight is applied to fitting frames only and does not change reported, unweighted RMS values. When automatic axis selection is enabled, a weight above `1×` also makes the selector use root-weighted fitting RMS; validation remains excluded.
+The root-landmark weight is controlled by a `1.00×–3.00×` slider (step `0.01×`, default `1.00×`). `1×` gives every annotated landmark equal influence; approximately `1.41×` balances the aggregate Root contribution against the two tips; values near `2×` or `3×` can be used when root alignment is the priority. The weight is applied to fitting frames only and does not change reported, unweighted RMS values. When automatic axis selection is enabled, a weight above `1×` also makes the selector use root-weighted fitting RMS; validation remains excluded.
 
 ## Features
 
