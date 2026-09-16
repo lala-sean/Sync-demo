@@ -24,10 +24,12 @@ class GeometryTests(unittest.TestCase):
 
     def test_geometry_defaults_and_validation(self):
         self.assertEqual(geometry_parameters(),{
-            'center_axis':'+Y','opening_axis':'+X','optimize_axes':True,'offset_mode':'zero','manual_offset_mm':[0.,0.,0.]})
+            'center_axis':'+Y','opening_axis':'+X','optimize_axes':True,'offset_mode':'zero','manual_offset_mm':[0.,0.,0.],
+            'root_weight':1.0})
         with self.assertRaises(ValueError):geometry_parameters({'center_axis':'+Y','opening_axis':'+Y'})
         with self.assertRaises(ValueError):geometry_parameters({'center_axis':'+Y','opening_axis':'-Y'})
         with self.assertRaises(ValueError):geometry_parameters({'offset_mode':'manual','manual_offset_mm':[100,0,0]})
+        with self.assertRaises(ValueError):geometry_parameters({'root_weight':4})
 
     def test_projection_zero_manual_and_optimized_offset(self):
         state=np.array([[0,0,0,0,0,0,1,0],[.01,0,0,0,0,0,1,1.]])
@@ -74,7 +76,8 @@ class GeometryTests(unittest.TestCase):
         state=np.c_[pose,np.tile([0,0,0,0,0,0,1,0],(n,1))]
         camera={**DEFAULT_CAMERA,'image_size':[800,600],'intrinsics':[900,900,400,300,0,0,0,0,0,0,0,0]}
         geometry={'center_axis':'+Y','opening_axis':'+X','offset_mode':offset_mode,
-                  'optimize_axes':False,'manual_offset_mm':[3,-2,1] if offset_mode=='manual' else [0,0,0]}
+                  'optimize_axes':False,'manual_offset_mm':[3,-2,1] if offset_mode=='manual' else [0,0,0],
+                  'root_weight':1.0}
         center=pose[:,:3].mean(0);rv=Rotation.from_euler('xyz',[2.8,.1,-.3]).as_rotvec();tv=[.01,-.005,.32]
         offset=[.003,-.002,.001] if offset_mode=='optimize' else []
         q=np.r_[rv,tv,offset,np.log(.017)]
@@ -115,13 +118,33 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(len(result['parameter_vector']),10)
         self.assertLess(result['fit_rms_px'],.1);self.assertLess(result['validation_rms_px'],.1)
         np.testing.assert_allclose(result['pivot_offset_tool_m'],[.003,-.002,.001],atol=2e-4)
+        np.testing.assert_allclose(result['root_correction_tool_m'],result['pivot_offset_tool_m'],atol=0)
+        self.assertLess(result['fit_root_rms_px'],.1);self.assertLess(result['validation_root_rms_px'],.1)
+        self.assertLess(result['fit_tip_rms_px'],.1);self.assertLess(result['validation_tip_rms_px'],.1)
+
+    def test_root_weight_prioritizes_root_without_validation_leakage(self):
+        episode,camera,geometry,annotations,_=self.synthetic_fit_fixture('optimize')
+        for annotation in annotations:
+            if annotation['role']=='fit':
+                annotation['points'][1][0]+=15;annotation['points'][2][0]+=15
+        ordinary=fit(episode,annotations,camera,geometry=geometry,starts=4)
+        emphasized=fit(episode,annotations,camera,geometry={**geometry,'root_weight':2},starts=4)
+        self.assertLess(emphasized['fit_root_rms_px'],ordinary['fit_root_rms_px'])
+        self.assertGreater(emphasized['fit_tip_rms_px'],ordinary['fit_tip_rms_px'])
+        perturbed=copy.deepcopy(annotations)
+        for annotation in perturbed:
+            if annotation['role']=='validation':
+                for point in annotation['points']:point[0]+=50
+        repeated=fit(episode,perturbed,camera,geometry={**geometry,'root_weight':2},starts=4)
+        np.testing.assert_allclose(emphasized['parameter_vector'],repeated['parameter_vector'],atol=1e-9,rtol=0)
 
     def test_discrete_axis_selection_uses_fit_frames_only(self):
         episode,camera,geometry,annotations,_=self.synthetic_fit_fixture('zero')
-        auto={**geometry,'center_axis':'+X','opening_axis':'+Z','optimize_axes':True}
+        auto={**geometry,'center_axis':'+X','opening_axis':'+Z','optimize_axes':True,'root_weight':2}
         result=fit(episode,annotations,camera,geometry=auto,starts=3)
         self.assertEqual((result['geometry']['center_axis'],result['geometry']['opening_axis']),('+Y','+X'))
         self.assertTrue(result['geometry']['optimize_axes']);self.assertEqual(len(result['axis_selection']['candidates']),24)
+        self.assertEqual(result['axis_selection']['selection_metric'],'fit_weighted_rms_px')
         self.assertFalse(result['axis_selection']['validation_used_for_selection'])
         perturbed=copy.deepcopy(annotations)
         for a in perturbed:
@@ -130,8 +153,8 @@ class GeometryTests(unittest.TestCase):
         other=fit(episode,perturbed,camera,geometry=auto,starts=3)
         self.assertEqual((other['geometry']['center_axis'],other['geometry']['opening_axis']),('+Y','+X'))
         np.testing.assert_allclose(result['parameter_vector'],other['parameter_vector'],atol=1e-9,rtol=0)
-        np.testing.assert_allclose([x['fit_rms_px'] for x in result['axis_selection']['candidates']],
-                                   [x['fit_rms_px'] for x in other['axis_selection']['candidates']],atol=1e-10,rtol=0)
+        np.testing.assert_allclose([x['fit_weighted_rms_px'] for x in result['axis_selection']['candidates']],
+                                   [x['fit_weighted_rms_px'] for x in other['axis_selection']['candidates']],atol=1e-10,rtol=0)
 
     def test_http_security_and_packaged_assets(self):
         from sync_demo import app

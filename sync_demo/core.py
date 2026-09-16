@@ -171,9 +171,12 @@ def geometry_parameters(config=None):
     manual=np.asarray(config.get('manual_offset_mm',[0,0,0]),dtype=float)
     if manual.shape!=(3,) or not np.isfinite(manual).all() or np.any(np.abs(manual)>60):
         raise ValueError('Manual offset must contain finite X/Y/Z values between -60 and 60 mm.')
+    root_weight=float(config.get('root_weight',1.0))
+    if not np.isfinite(root_weight) or not 1<=root_weight<=3:
+        raise ValueError('Root landmark weight must be between 1 and 3.')
     if mode=='zero':manual=np.zeros(3)
     return {'center_axis':center_axis,'opening_axis':opening_axis,'optimize_axes':bool(config.get('optimize_axes',True)),'offset_mode':mode,
-            'manual_offset_mm':manual.tolist()}
+            'manual_offset_mm':manual.tolist(),'root_weight':root_weight}
 
 def project_geometry(q, state, center, K, D, indices, geometry=None):
     """Project Root/A/B using one geometry definition for fit, validation and export.
@@ -237,7 +240,8 @@ def _fit_one_geometry(episode, annotations, camera, arm=1, scale=True, geometry=
     if not ok:raise ValueError('PnP initialization failed. Use more spatially diverse frames.')
     def residual(q):
         pred,cam=project_geometry(q,state,center,K,D,ids[train],geometry)
-        return np.r_[((pred-uv[train])*weights[train]).ravel(),np.minimum(cam[:,:,2]-.03,0).ravel()*1e4]
+        point_weights=weights[train].copy();point_weights[:,0]*=geometry['root_weight']
+        return np.r_[((pred-uv[train])*point_weights).ravel(),np.minimum(cam[:,:,2]-.03,0).ravel()*1e4]
     if geometry['offset_mode']=='optimize':
         lo=np.r_[[-np.inf]*3,[-2,-2,.03],[-.06]*3,np.log(.003)]
         hi=np.r_[[np.inf]*3,[2,2,2],[.06]*3,np.log(.035)]
@@ -255,7 +259,15 @@ def _fit_one_geometry(episode, annotations, camera, arm=1, scale=True, geometry=
     q=best.x;Rc=Rotation.from_rotvec(q[:3]).as_matrix();C=np.eye(4);C[:3,:3]=Rc;C[:3,3]=q[3:6]-Rc@center
     projected,cam=project_geometry(q,state,center,K,D,np.arange(len(state)),geometry)
     error=np.linalg.norm(projected[ids]-uv,axis=2);valid=weights[:,:,0]>0
-    def rms(sel):return float(np.sqrt(np.mean(error[sel][valid[sel]]**2)))
+    def point_rms(sel, point_ids=(0,1,2)):
+        point_ids=np.asarray(point_ids,dtype=int)
+        subset=error[np.ix_(sel,point_ids)];mask=valid[np.ix_(sel,point_ids)]
+        return float(np.sqrt(np.mean(subset[mask]**2))) if np.any(mask) else None
+    def rms(sel):return point_rms(sel)
+    def weighted_rms(sel):
+        point_weight=np.ones((len(sel),3));point_weight[:,0]=geometry['root_weight']
+        mask=valid[sel];weighted_error=error[sel]*point_weight
+        return float(np.sqrt(np.sum(weighted_error[mask]**2)/np.sum(point_weight[mask]**2)))
     axeslocal=np.vstack([np.zeros(3),np.eye(3)*.002])
     base=np.einsum('nij,kj->nki',Rotation.from_quat(state[:,3:7]).as_matrix(),axeslocal)+state[:,None,:3]
     axcam=base@Rc.T+C[:3,3]
@@ -273,10 +285,17 @@ def _fit_one_geometry(episode, annotations, camera, arm=1, scale=True, geometry=
     offset=(q[6:9] if geometry['offset_mode']=='optimize' else fixed_offset)
     details=[]
     for i,a in enumerate(records):details.append({'frame':int(ids[i]),'role':a['role'],'rms_px':float(np.sqrt(np.mean(error[i][valid[i]]**2)))})
+    fit_root_rms=point_rms(train,(0,));validation_root_rms=point_rms(held,(0,))
+    fit_tip_rms=point_rms(train,(1,2));validation_tip_rms=point_rms(held,(1,2))
     return {'status':'VISUAL_REGISTRATION_NOT_CONTROL_CALIBRATION','arm':arm,'camera':camera,'K_used':K.tolist(),'D_used':D.tolist(),
             'parameter_vector':q.tolist(),'center_m':center.tolist(),'T_camera_PSMbase':C.tolist(),'geometry':geometry,
-            'pivot_offset_tool_m':offset.tolist(),'jaw_length_mm':float(np.exp(q[length_index])*1000),'opening_definition':'state_7 radians, total jaw opening angle; each jaw uses ±state_7/2',
-            'fit_rms_px':rms(train),'validation_rms_px':rms(held),'details':details,'warnings':warnings,'dataset_fingerprint':episode['fingerprint'],
+            'root_correction_tool_m':offset.tolist(),'pivot_offset_tool_m':offset.tolist(),
+            'jaw_length_mm':float(np.exp(q[length_index])*1000),'opening_definition':'state_7 radians, total jaw opening angle; each jaw uses ±state_7/2',
+            'fit_rms_px':rms(train),'validation_rms_px':rms(held),
+            'fit_weighted_rms_px':weighted_rms(train),'validation_weighted_rms_px':weighted_rms(held),
+            'fit_root_rms_px':fit_root_rms,'validation_root_rms_px':validation_root_rms,
+            'fit_tip_rms_px':fit_tip_rms,'validation_tip_rms_px':validation_tip_rms,
+            'details':details,'warnings':warnings,'dataset_fingerprint':episode['fingerprint'],
             'annotations':records,'projected':projected.tolist(),'axes':axes.tolist(),'visible':np.all(cam[:,:,2]>0,axis=1).tolist(),
             'optimizer_success':bool(best.success),'optimizer_message':best.message,'source':{'csv':episode['csv'],'video':episode['video'],'fps':episode['fps'],'size':episode['size']}}
 
@@ -285,8 +304,8 @@ def fit(episode, annotations, camera, arm=1, scale=True, geometry=None, progress
 
     Automatic axis selection enumerates only orthogonal signed tool axes. Each
     candidate is independently fitted, and the winner is selected using fitting
-    RMS only. Held-out validation pixels never influence the selected pair or its
-    optimized parameters.
+    RMS only (root-weighted fitting RMS when root_weight > 1). Held-out validation
+    pixels never influence the selected pair or its optimized parameters.
     """
     geometry=geometry_parameters(geometry)
     if not geometry['optimize_axes']:
@@ -298,13 +317,15 @@ def fit(episode, annotations, camera, arm=1, scale=True, geometry=None, progress
             progress(f'Axes {i+1} / {len(pairs)} ({center_axis} center, {opening_axis} opening): {message}')
         result=_fit_one_geometry(episode,annotations,camera,arm,scale,candidate,report,starts)
         results.append(result);candidates.append({'center_axis':center_axis,'opening_axis':opening_axis,
-            'fit_rms_px':result['fit_rms_px'],'validation_rms_px':result['validation_rms_px'],
+            'fit_rms_px':result['fit_rms_px'],'fit_weighted_rms_px':result['fit_weighted_rms_px'],
+            'validation_rms_px':result['validation_rms_px'],
             'jaw_length_mm':result['jaw_length_mm'],'pivot_offset_tool_m':result['pivot_offset_tool_m']})
-    selected_index=int(np.argmin([x['fit_rms_px'] for x in candidates]));selected=results[selected_index]
+    selection_metric='fit_weighted_rms_px' if geometry['root_weight']!=1 else 'fit_rms_px'
+    selected_index=int(np.argmin([x[selection_metric] for x in candidates]));selected=results[selected_index]
     selected['geometry']['optimize_axes']=True
-    selected['axis_selection']={'mode':'discrete_signed_coordinate_axes','selection_metric':'fit_rms_px',
+    selected['axis_selection']={'mode':'discrete_signed_coordinate_axes','selection_metric':selection_metric,
         'validation_used_for_selection':False,'selected_index':selected_index,'candidates':candidates}
-    selected['warnings'].append('Centerline and opening directions were selected from 24 orthogonal signed-axis pairs using fitting frames only.')
+    selected['warnings'].append(f'Centerline and opening directions were selected from 24 orthogonal signed-axis pairs using {selection_metric} on fitting frames only.')
     return selected
 
 def export_video(episode,result,path,progress=lambda x:None):

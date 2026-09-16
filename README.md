@@ -17,21 +17,23 @@ The constrained jaw skeleton contains a jaw root and two symmetric tips. Each ja
 - jaw centerline: `±X`, `±Y`, or `±Z` in the tool frame;
 - opening direction: either signed axis orthogonal to the centerline.
 
-Every pair receives an independent robust fit. The pair with the lowest fitting RMS is selected; validation landmarks never participate in axis selection. Automatic selection can be disabled in the UI to fix the axes manually, using `+Y` centerline and `+X` opening as the initial values.
+Every pair receives an independent robust fit. The pair with the lowest fitting RMS is selected; when Root weight is above `1×`, the corresponding root-weighted fitting RMS is used. Validation landmarks never participate in axis selection. Automatic selection can be disabled in the UI to fix the axes manually, using `+Y` centerline and `+X` opening as the initial values.
 
 The UI also lets the operator choose the:
 
-- tool-origin to jaw-root offset mode:
-  - **Fixed at zero** — default;
-  - **Manual fixed offset** — X/Y/Z entered in millimetres;
-  - **Optimize offset** — adds a bounded 3D offset to the fit.
+- jaw-root correction in the tool frame:
+  - **No correction** — default;
+  - **Manual XYZ correction** — X/Y/Z entered in millimetres;
+  - **Optimize one fixed 3D correction** — adds a bounded correction vector shared by every frame.
 
 With zero or manual offset, the only continuously optimized quantities are:
 
 1. one fixed 6-DoF camera extrinsic;
 2. one shared jaw length.
 
-Optimize-offset mode additionally fits the three offset coordinates. The program does not fit a jaw mounting rotation or a gripper gain.
+Optimize-correction mode additionally fits the three root-correction coordinates. It never fits a separate per-frame 2D correction. The program does not fit a jaw mounting rotation or a gripper gain.
+
+The optional root-landmark weight remains restricted to `1×–3×`. `1×` gives every annotated landmark equal influence; `1.41×` balances the aggregate Root contribution against the two tips; `2×` or `3×` can be used when root alignment is the priority. The weight is applied to fitting frames only and does not change reported, unweighted RMS values. When automatic axis selection is enabled, a weight above `1×` also makes the selector use root-weighted fitting RMS; validation remains excluded.
 
 ## Features
 
@@ -160,8 +162,9 @@ Validation frames are excluded from SQPnP initialization and nonlinear optimizat
 `T_camera_PSMbase` maps column vectors from the selected PSM base frame into the camera frame. Translation is in metres. The registration JSON also records:
 
 - camera matrix and distortion values actually used;
-- selected centerline, opening axis, all 24 candidate scores and offset mode;
-- resolved tool-frame root offset;
+- selected centerline, opening axis, all 24 candidate scores, root weight and correction mode;
+- resolved tool-frame root correction (`root_correction_tool_m`; the legacy `pivot_offset_tool_m` alias is retained);
+- overall, root-only and tip-only RMS values for fitting and validation frames;
 - fitted jaw length;
 - annotations and their fit/validation roles;
 - projected Root/A/B and tool-frame axes for every source frame;
