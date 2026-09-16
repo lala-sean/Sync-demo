@@ -7,4 +7,4 @@ build/
 dist/
 outputs/*
 !outputs/.gitkeep
-
+sync_demo/outputs/

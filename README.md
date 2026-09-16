@@ -12,10 +12,15 @@ The robot observation supplies a 6D tool pose for every video frame:
 - quaternion in `qx, qy, qz, qw` order;
 - `state_7` as the full jaw opening angle in radians.
 
-The constrained jaw skeleton contains a jaw root and two symmetric tips. Each jaw uses `±state_7 / 2`; Tip A opens toward the selected positive opening axis and Tip B opens in the opposite direction. The UI lets the operator choose:
+The constrained jaw skeleton contains a jaw root and two symmetric tips. Each jaw uses `±state_7 / 2`; Tip A opens toward the selected positive opening axis and Tip B opens in the opposite direction. By default the application jointly evaluates the six valid orthogonal coordinate-axis pairs:
 
-- jaw centerline: `+X`, `+Y`, or `+Z` in the tool frame; default `+Y`;
-- opening direction: either remaining positive tool axis; default `+X`;
+- jaw centerline: `+X`, `+Y`, or `+Z` in the tool frame;
+- opening direction: either remaining positive tool axis.
+
+Every pair receives an independent robust fit. The pair with the lowest fitting RMS is selected; validation landmarks never participate in axis selection. Automatic selection can be disabled in the UI to fix the axes manually, using `+Y` centerline and `+X` opening as the initial values.
+
+The UI also lets the operator choose the:
+
 - tool-origin to jaw-root offset mode:
   - **Fixed at zero** — default;
   - **Manual fixed offset** — X/Y/Z entered in millimetres;
@@ -39,7 +44,8 @@ Optimize-offset mode additionally fits the three offset coordinates. The program
 - Action-based selection covers low/high gripper values, grasp changes, position, orientation and recording time; action is never used as registration geometry.
 - Configurable PSM1/PSM2 observation source.
 - Importable OpenCV8 camera intrinsics with optional full-frame resolution scaling.
-- Separate fitting and held-out validation frames.
+- Joint discrete optimization over six orthogonal positive coordinate-axis pairs, with an optional manual-axis mode.
+- Separate fitting and held-out validation frames; validation is excluded from both parameter fitting and axis selection.
 - SQPnP camera initialization followed by bounded robust soft-L1 optimization.
 - Fit RMS, validation RMS and per-frame residual table.
 - Saved landmark JSON includes dataset fingerprint, image size, arm, camera and geometry settings.
@@ -140,7 +146,7 @@ The order is `fx, fy, cx, cy, k1, k2, p1, p2, k3, k4, k5, k6`. Resolution scalin
 1. Open a session folder or use the folder picker.
 2. Select an episode and PSM observation stream.
 3. Confirm camera intrinsics.
-4. Select centerline, opening direction and offset mode.
+4. Leave automatic coordinate-axis selection enabled, or disable it to fix the centerline and opening direction manually. Select the offset mode.
 5. Use uniform samples, action-based samples or manually added frames.
 6. Mark Root, Tip A and Tip B. Maintain the same physical A/B identity across frames.
 7. Use at least six fitting frames, including four complete Root/A/B frames, and at least two held-out validation frames. Eight or more diverse fitting frames are recommended.
@@ -154,7 +160,7 @@ Validation frames are excluded from SQPnP initialization and nonlinear optimizat
 `T_camera_PSMbase` maps column vectors from the selected PSM base frame into the camera frame. Translation is in metres. The registration JSON also records:
 
 - camera matrix and distortion values actually used;
-- centerline, opening axis and offset mode;
+- selected centerline, opening axis, all six candidate scores and offset mode;
 - resolved tool-frame root offset;
 - fitted jaw length;
 - annotations and their fit/validation roles;
@@ -172,7 +178,7 @@ Install the package in editable mode, then run:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover camera validation, all offset modes, axis constraints, symmetric jaw projection, fit/validation isolation, action-based frame selection and localhost request protection. A real-session verification script is included for the developer's local fixture but is not required for installation on another computer.
+The tests cover camera validation, all offset modes, discrete axis selection, axis constraints, symmetric jaw projection, fit/validation and selection isolation, action-based frame selection and localhost request protection.
 
 ## MP4 export note
 

@@ -170,7 +170,7 @@ def geometry_parameters(config=None):
     if manual.shape!=(3,) or not np.isfinite(manual).all() or np.any(np.abs(manual)>60):
         raise ValueError('Manual offset must contain finite X/Y/Z values between -60 and 60 mm.')
     if mode=='zero':manual=np.zeros(3)
-    return {'center_axis':center_axis,'opening_axis':opening_axis,'offset_mode':mode,
+    return {'center_axis':center_axis,'opening_axis':opening_axis,'optimize_axes':bool(config.get('optimize_axes',True)),'offset_mode':mode,
             'manual_offset_mm':manual.tolist()}
 
 def project_geometry(q, state, center, K, D, indices, geometry=None):
@@ -200,7 +200,7 @@ def project_geometry(q, state, center, K, D, indices, geometry=None):
     uv=cv2.projectPoints(cam.reshape(-1,3),np.zeros(3),np.zeros(3),K,D)[0].reshape(-1,3,2)
     return uv,cam
 
-def fit(episode, annotations, camera, arm=1, scale=True, geometry=None, progress=lambda x:None, starts=8):
+def _fit_one_geometry(episode, annotations, camera, arm=1, scale=True, geometry=None, progress=lambda x:None, starts=8):
     if arm not in [1,2]:raise ValueError('Choose PSM1 or PSM2.')
     state=episode['state'][:,(arm-1)*8:arm*8]
     norms=np.linalg.norm(state[:,3:7],axis=1)
@@ -277,6 +277,33 @@ def fit(episode, annotations, camera, arm=1, scale=True, geometry=None, progress
             'fit_rms_px':rms(train),'validation_rms_px':rms(held),'details':details,'warnings':warnings,'dataset_fingerprint':episode['fingerprint'],
             'annotations':records,'projected':projected.tolist(),'axes':axes.tolist(),'visible':np.all(cam[:,:,2]>0,axis=1).tolist(),
             'optimizer_success':bool(best.success),'optimizer_message':best.message,'source':{'csv':episode['csv'],'video':episode['video'],'fps':episode['fps'],'size':episode['size']}}
+
+def fit(episode, annotations, camera, arm=1, scale=True, geometry=None, progress=lambda x:None, starts=8):
+    """Fit one fixed axis pair or select the best pair from six discrete choices.
+
+    Automatic axis selection enumerates only orthogonal positive tool axes. Each
+    candidate is independently fitted, and the winner is selected using fitting
+    RMS only. Held-out validation pixels never influence the selected pair or its
+    optimized parameters.
+    """
+    geometry=geometry_parameters(geometry)
+    if not geometry['optimize_axes']:
+        return _fit_one_geometry(episode,annotations,camera,arm,scale,geometry,progress,starts)
+    candidates=[];results=[];pairs=[(c,o) for c in AXES for o in AXES if c!=o]
+    for i,(center_axis,opening_axis) in enumerate(pairs):
+        candidate={**geometry,'center_axis':center_axis,'opening_axis':opening_axis,'optimize_axes':False}
+        def report(message,i=i,center_axis=center_axis,opening_axis=opening_axis):
+            progress(f'Axes {i+1} / {len(pairs)} ({center_axis} center, {opening_axis} opening): {message}')
+        result=_fit_one_geometry(episode,annotations,camera,arm,scale,candidate,report,starts)
+        results.append(result);candidates.append({'center_axis':center_axis,'opening_axis':opening_axis,
+            'fit_rms_px':result['fit_rms_px'],'validation_rms_px':result['validation_rms_px'],
+            'jaw_length_mm':result['jaw_length_mm'],'pivot_offset_tool_m':result['pivot_offset_tool_m']})
+    selected_index=int(np.argmin([x['fit_rms_px'] for x in candidates]));selected=results[selected_index]
+    selected['geometry']['optimize_axes']=True
+    selected['axis_selection']={'mode':'discrete_positive_coordinate_axes','selection_metric':'fit_rms_px',
+        'validation_used_for_selection':False,'selected_index':selected_index,'candidates':candidates}
+    selected['warnings'].append('Centerline and opening directions were selected from six orthogonal positive-axis pairs using fitting frames only.')
+    return selected
 
 def export_video(episode,result,path,progress=lambda x:None):
     cap=cv2.VideoCapture(episode['video']);width=1280;height=round(episode['size'][1]*width/episode['size'][0]/2)*2

@@ -6,7 +6,7 @@ import numpy as np
 from .core import DEFAULT_CAMERA,discover,read_episode,frame_jpeg,fit,export_video,camera_parameters,select_action_frames
 
 ROOT=Path(__file__).parent
-OUTPUT=ROOT/'outputs';OUTPUT.mkdir(exist_ok=True)
+OUTPUT=Path(os.environ.get('SYNC_DEMO_OUTPUT_DIR',Path.cwd()/'outputs')).expanduser().resolve();OUTPUT.mkdir(parents=True,exist_ok=True)
 app=Flask(__name__,static_folder='static');app.config['MAX_CONTENT_LENGTH']=2*1024**3
 TOKEN=secrets.token_hex(24);datasets={};jobs={};pairsets={};compute_lock=threading.Lock()
 
